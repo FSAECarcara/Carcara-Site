@@ -52,9 +52,14 @@ def get_pecas():
         })
     
     except gspread.exceptions.WorksheetNotFound:
-        
-        
-        
+        return jsonify({"erro": f"Página '{pagina}' não encontrada"}), 404
+    
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+# -------------------------------------------------------------------
+# NOVA FUNÇÃO SEPARADA (/status) verificada no render
+# -------------------------------------------------------------------
 @app.route('/status')
 def status_check():
     def test_sheets_access():
@@ -83,7 +88,3 @@ def status_check():
             "error": str(e),
             "details": "Problema de conexão com o Google Sheets"
         }), 500
-        return jsonify({"erro": f"Página '{pagina}' não encontrada"}), 404
-    
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
