@@ -53,6 +53,8 @@ def get_pecas():
     
     except gspread.exceptions.WorksheetNotFound:
         
+        
+        
 @app.route('/status')
 def status_check():
     def test_sheets_access():
