@@ -3,8 +3,10 @@ import json
 import gspread
 from google.oauth2.service_account import Credentials
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 # 1. Obter a credencial compacta da variável de ambiente
 creds_json_str = os.getenv('GOOGLE_CREDENTIALS')
