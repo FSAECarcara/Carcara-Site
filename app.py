@@ -7,10 +7,10 @@ from flask import Flask, jsonify, request
 app = Flask(__name__)
 
 # 1. Obter a credencial compacta da variável de ambiente
-creds_json_str = os.getenv('GOOGLE_CREDENTIALS_JSON')
+creds_json_str = os.getenv('GOOGLE_CREDENTIALS')
 
 if not creds_json_str:
-    raise RuntimeError("Variável GOOGLE_CREDENTIALS_JSON não definida!")
+    raise RuntimeError("Variável GOOGLE_CREDENTIALS não definida!")
 
 # 2. Converter string JSON para dicionário
 creds_dict = json.loads(creds_json_str)
