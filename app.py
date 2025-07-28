@@ -52,6 +52,35 @@ def get_pecas():
         })
     
     except gspread.exceptions.WorksheetNotFound:
+        
+@app.route('/status')
+def status_check():
+    def test_sheets_access():
+        """Verifica acesso básico ao Google Sheets"""
+        try:
+            spreadsheet = CLIENT.open_by_key(SPREADSHEET_ID)
+            spreadsheet.worksheets()  # Tenta listar as abas
+            return True
+        except Exception as e:
+            raise ConnectionError(f"Falha no acesso ao Google Sheets: {str(e)}")
+    
+    try:
+        # Verifica o acesso ao Google Sheets
+        test_sheets_access()
+        
+        return jsonify({
+            "status": "online",
+            "service": "API de Peças",
+            "version": "1.0",
+            "planilha": SPREADSHEET_ID
+        }), 200
+    
+    except Exception as e:
+        return jsonify({
+            "status": "degraded",
+            "error": str(e),
+            "details": "Problema de conexão com o Google Sheets"
+        }), 500
         return jsonify({"erro": f"Página '{pagina}' não encontrada"}), 404
     
     except Exception as e:
