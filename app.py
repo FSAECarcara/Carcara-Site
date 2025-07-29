@@ -56,8 +56,17 @@ def get_pecas():
     except gspread.exceptions.WorksheetNotFound:
         return jsonify({"erro": f"Página '{pagina}' não encontrada"}), 404
     
+    except gspread.exceptions.APIError as e:
+        app.logger.error(f"Erro na API Google: {e.response.json()}")
+        return jsonify({
+            "erro": "Problema com o Google Sheets",
+            "codigo": e.response.status_code,
+            "detalhes": e.response.json().get('error', {}).get('message')
+        }), 502
+    
     except Exception as e:
-        return jsonify({"erro": str(e)}), 500
+        app.logger.exception("Erro interno:")
+        return jsonify({"erro": "Erro interno no servidor"}), 500
 
 # -------------------------------------------------------------------
 # NOVA FUNÇÃO SEPARADA (/status) verificada no render
