@@ -44,13 +44,26 @@ cache.init_app(app)
 def get_pecas():
     try:
         pagina = request.args.get('pagina', default='freios')
-        
+        busca = request.args.get('busca', default='')
         # Acessa a planilha remota
         spreadsheet = CLIENT.open_by_key(SPREADSHEET_ID)
         worksheet = spreadsheet.worksheet(pagina)
         
         # Obtém todos os dados como lista de dicionários
         dados = worksheet.get_all_records()
+
+        if busca:
+            busca = busca.lower()
+            dados_filtrados = []
+            for peca in dados:
+                # Verifica vários campos para a busca
+                if (busca in str(peca.get('ID', '')).lower() or 
+                    busca in peca.get('peca', '').lower() or 
+                    busca in peca.get('material', '').lower() or 
+                    busca in peca.get('descricao', '').lower() or 
+                    busca in peca.get('fornecedor', '').lower()):
+                    dados_filtrados.append(peca)
+            dados = dados_filtrados
         
         return jsonify({
             "pagina": pagina,
