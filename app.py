@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_caching import Cache
 
 app = Flask(__name__)
 CORS(app)
@@ -35,7 +36,11 @@ SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
 # ID da planilha (encontre na URL: https://docs.google.com/spreadsheets/d/SEU_ID_AQUI/edit)
 SPREADSHEET_ID = "1vmIKVDCVs-KbINHRUnVlyyQVE-5JXV4rIme8dJB-keI"
 
+cache = Cache(config={'CACHE_TYPE': 'SimpleCache'})
+cache.init_app(app)
+
 @app.route('/pecas', methods=['GET'])
+@cache.cached(timeout=300, query_string=True)
 def get_pecas():
     try:
         pagina = request.args.get('pagina', default='freios')
