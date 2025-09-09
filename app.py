@@ -1,6 +1,7 @@
 import os
 import json
 import gspread
+import re
 from google.oauth2.service_account import Credentials
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -45,6 +46,68 @@ SPREADSHEET_ID = "1vmIKVDCVs-KbINHRUnVlyyQVE-5JXV4rIme8dJB-keI"
 
 cache = Cache(config={'CACHE_TYPE': 'SimpleCache'})
 cache.init_app(app)
+
+def get_next_id(records):
+    """
+    Gera o próximo ID baseado nos IDs existentes.
+    Para IDs numéricos: incrementa o maior número.
+    Para IDs alfanuméricos: gera um novo ID sequencial baseado no padrão.
+    """
+    if not records:
+        return "1"
+    
+    # Extrai todos os IDs existentes
+    existing_ids = []
+    for record in records:
+        if 'ID' in record and record['ID']:
+            existing_ids.append(record['ID'])
+    
+    if not existing_ids:
+        return "1"
+    
+    # Verifica se todos os IDs são numéricos
+    all_numeric = all(id.replace('.', '').isdigit() for id in existing_ids if id)
+    
+    if all_numeric:
+        # IDs numéricos - encontra o maior e incrementa
+        numeric_ids = [float(id) for id in existing_ids if id.replace('.', '').isdigit()]
+        return str(int(max(numeric_ids)) + 1)
+    else:
+        # IDs alfanuméricos - analisa o padrão para gerar o próximo
+        return generate_next_alphanumeric_id(existing_ids)
+
+def generate_next_alphanumeric_id(existing_ids):
+    """
+    Gera o próximo ID para IDs alfanuméricos.
+    Assume que os IDs seguem um padrão como: ABC 123 2024-1 CR-01
+    """
+    # Encontra o maior ID numérico no final dos IDs
+    pattern = r'(\d+)$'
+    max_num = 0
+    
+    for id_str in existing_ids:
+        match = re.search(pattern, id_str)
+        if match:
+            num = int(match.group(1))
+            if num > max_num:
+                max_num = num
+    
+    # Se não encontrou números, retorna um padrão básico
+    if max_num == 0:
+        return "FRS-001"
+    
+    # Encontra o prefixo do último ID (assumindo que todos têm o mesmo prefixo)
+    prefix_pattern = r'^(.+?)(\d+)$'
+    prefix = "FRS"
+    
+    for id_str in existing_ids:
+        match = re.match(prefix_pattern, id_str)
+        if match:
+            prefix = match.group(1)
+            break
+    
+    # Retorna o próximo ID com o número incrementado
+    return f"{prefix}{max_num + 1:03d}"
 
 @app.route('/pecas', methods=['GET'])
 @cache.cached(timeout=300, query_string=True)
@@ -109,12 +172,7 @@ def adicionar_peca():
 
         # Obter todos os registros para determinar o próximo ID
         records = worksheet.get_all_records()
-        next_id = 1
-        if records:
-            # Encontra o maior ID existente e incrementa
-            ids = [int(record['ID']) for record in records if 'ID' in record and record['ID']]
-            if ids:
-                next_id = max(ids) + 1
+        next_id = get_next_id(records)
 
         # Preparar dados para adicionar
         nova_peca = {
@@ -176,10 +234,22 @@ def atualizar_peca(peca_id):
 
         # Atualizar os campos
         campos = ['peca', 'quantidade', 'material', 'massa(g)', 'valor($)', 'descricao', 'fornecedor']
+        col_indices = {
+            'ID': 1,
+            'peca': 2,
+            'quantidade': 3,
+            'material': 4,
+            'massa(g)': 5,
+            'valor($)': 6,
+            'descricao': 7,
+            'fornecedor': 8
+        }
+        
         for campo in campos:
             if campo in data:
-                col_index = campos.index(campo) + 2  # +2 porque ID é a coluna 1
-                worksheet.update_cell(linha_index, col_index, data[campo])
+                col_index = col_indices.get(campo)
+                if col_index:
+                    worksheet.update_cell(linha_index, col_index, data[campo])
 
         return jsonify({"mensagem": "Peça atualizada com sucesso"}), 200
 
