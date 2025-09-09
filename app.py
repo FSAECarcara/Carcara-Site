@@ -2,6 +2,7 @@ import os
 import json
 import gspread
 import re
+import time
 from google.oauth2.service_account import Credentials
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -44,7 +45,8 @@ SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
 # ID da planilha (encontre na URL: https://docs.google.com/spreadsheets/d/SEU_ID_AQUI/edit)
 SPREADSHEET_ID = "1vmIKVDCVs-KbINHRUnVlyyQVE-5JXV4rIme8dJB-keI"
 
-cache = Cache(config={'CACHE_TYPE': 'SimpleCache'})
+# Configuração de cache (vamos usar um timeout muito curto ou desativar para desenvolvimento)
+cache = Cache(config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 5})
 cache.init_app(app)
 
 def get_next_id(records):
@@ -60,7 +62,7 @@ def get_next_id(records):
     existing_ids = []
     for record in records:
         if 'ID' in record and record['ID']:
-            existing_ids.append(record['ID'])
+            existing_ids.append(str(record['ID']))
     
     if not existing_ids:
         return "1"
@@ -110,11 +112,11 @@ def generate_next_alphanumeric_id(existing_ids):
     return f"{prefix}{max_num + 1:03d}"
 
 @app.route('/pecas', methods=['GET'])
-@cache.cached(timeout=300, query_string=True)
 def get_pecas():
     try:
         pagina = request.args.get('pagina', default='freios')
         busca = request.args.get('busca', default='')
+        
         # Acessa a planilha remota
         spreadsheet = CLIENT.open_by_key(SPREADSHEET_ID)
         worksheet = spreadsheet.worksheet(pagina)
@@ -189,6 +191,9 @@ def adicionar_peca():
         # Adicionar nova linha
         worksheet.append_row(list(nova_peca.values()))
 
+        # Pequena pausa para garantir que a planilha foi atualizada
+        time.sleep(1)
+
         return jsonify({
             "mensagem": "Peça adicionada com sucesso",
             "id": next_id
@@ -251,6 +256,9 @@ def atualizar_peca(peca_id):
                 if col_index:
                     worksheet.update_cell(linha_index, col_index, data[campo])
 
+        # Pequena pausa para garantir que a planilha foi atualizada
+        time.sleep(1)
+
         return jsonify({"mensagem": "Peça atualizada com sucesso"}), 200
 
     except gspread.exceptions.WorksheetNotFound:
@@ -293,6 +301,9 @@ def deletar_peca(peca_id):
 
         # Deletar a linha
         worksheet.delete_rows(linha_index)
+
+        # Pequena pausa para garantir que a planilha foi atualizada
+        time.sleep(1)
 
         return jsonify({"mensagem": "Peça deletada com sucesso"}), 200
 
@@ -343,4 +354,3 @@ def status_check():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
