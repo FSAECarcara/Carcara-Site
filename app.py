@@ -45,73 +45,110 @@ SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
 # ID da planilha (encontre na URL: https://docs.google.com/spreadsheets/d/SEU_ID_AQUI/edit)
 SPREADSHEET_ID = "1vmIKVDCVs-KbINHRUnVlyyQVE-5JXV4rIme8dJB-keI"
 
-# Configuração de cache (vamos usar um timeout muito curto ou desativar para desenvolvimento)
-cache = Cache(config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 5})
+# Cache com timeout reduzido para minimizar chamadas à API
+cache = Cache(config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 10})
 cache.init_app(app)
 
-def get_next_id(records):
+# Dicionário para armazenar em cache os worksheets
+worksheet_cache = {}
+worksheet_cache_time = {}
+
+def get_next_id(worksheet):
     """
     Gera o próximo ID baseado nos IDs existentes.
-    Para IDs numéricos: incrementa o maior número.
-    Para IDs alfanuméricos: gera um novo ID sequencial baseado no padrão.
+    Usa col_values para ser mais eficiente que get_all_records.
     """
-    if not records:
+    try:
+        # Obtém apenas a coluna de IDs (mais eficiente)
+        coluna_ids = worksheet.col_values(1)
+        
+        # Remove o cabeçalho se existir
+        if coluna_ids and coluna_ids[0] == 'ID':
+            coluna_ids = coluna_ids[1:]
+        
+        # Filtra IDs vazios
+        existing_ids = [str(id_val) for id_val in coluna_ids if id_val]
+        
+        if not existing_ids:
+            return "1"
+        
+        # Verifica se todos os IDs são numéricos
+        all_numeric = all(id_val.replace('.', '').isdigit() for id_val in existing_ids if id_val)
+        
+        if all_numeric:
+            # IDs numéricos - encontra o maior e incrementa
+            numeric_ids = [float(id_val) for id_val in existing_ids if id_val.replace('.', '').isdigit()]
+            return str(int(max(numeric_ids)) + 1)
+        else:
+            # IDs alfanuméricos - analisa o padrão para gerar o próximo
+            return generate_next_alphanumeric_id(existing_ids)
+            
+    except Exception as e:
+        app.logger.error(f"Erro ao gerar próximo ID: {e}")
         return "1"
-    
-    # Extrai todos os IDs existentes
-    existing_ids = []
-    for record in records:
-        if 'ID' in record and record['ID']:
-            existing_ids.append(str(record['ID']))
-    
-    if not existing_ids:
-        return "1"
-    
-    # Verifica se todos os IDs são numéricos
-    all_numeric = all(id.replace('.', '').isdigit() for id in existing_ids if id)
-    
-    if all_numeric:
-        # IDs numéricos - encontra o maior e incrementa
-        numeric_ids = [float(id) for id in existing_ids if id.replace('.', '').isdigit()]
-        return str(int(max(numeric_ids)) + 1)
-    else:
-        # IDs alfanuméricos - analisa o padrão para gerar o próximo
-        return generate_next_alphanumeric_id(existing_ids)
 
 def generate_next_alphanumeric_id(existing_ids):
     """
     Gera o próximo ID para IDs alfanuméricos.
     Assume que os IDs seguem um padrão como: ABC 123 2024-1 CR-01
     """
-    # Encontra o maior ID numérico no final dos IDs
-    pattern = r'(\d+)$'
-    max_num = 0
-    
-    for id_str in existing_ids:
-        match = re.search(pattern, id_str)
-        if match:
-            num = int(match.group(1))
-            if num > max_num:
-                max_num = num
-    
-    # Se não encontrou números, retorna um padrão básico
-    if max_num == 0:
+    try:
+        # Encontra o maior ID numérico no final dos IDs
+        pattern = r'(\d+)$'
+        max_num = 0
+        
+        for id_str in existing_ids:
+            match = re.search(pattern, id_str)
+            if match:
+                num = int(match.group(1))
+                if num > max_num:
+                    max_num = num
+        
+        # Se não encontrou números, retorna um padrão básico
+        if max_num == 0:
+            return "FRS-001"
+        
+        # Encontra o prefixo do último ID (assumindo que todos têm o mesmo prefixo)
+        prefix_pattern = r'^(.+?)(\d+)$'
+        prefix = "FRS"
+        
+        for id_str in existing_ids:
+            match = re.match(prefix_pattern, id_str)
+            if match:
+                prefix = match.group(1)
+                break
+        
+        # Retorna o próximo ID com o número incrementado
+        return f"{prefix}{max_num + 1:03d}"
+    except Exception as e:
+        app.logger.error(f"Erro ao gerar ID alfanumérico: {e}")
         return "FRS-001"
+
+def get_cached_worksheet(spreadsheet, worksheet_name):
+    """
+    Obtém worksheet com cache para reduzir chamadas à API
+    """
+    current_time = time.time()
+    cache_key = f"{spreadsheet.id}_{worksheet_name}"
     
-    # Encontra o prefixo do último ID (assumindo que todos têm o mesmo prefixo)
-    prefix_pattern = r'^(.+?)(\d+)$'
-    prefix = "FRS"
+    # Verifica se o cache é válido (5 minutos)
+    if (cache_key in worksheet_cache and 
+        cache_key in worksheet_cache_time and
+        current_time - worksheet_cache_time[cache_key] < 300):
+        return worksheet_cache[cache_key]
     
-    for id_str in existing_ids:
-        match = re.match(prefix_pattern, id_str)
-        if match:
-            prefix = match.group(1)
-            break
-    
-    # Retorna o próximo ID com o número incrementado
-    return f"{prefix}{max_num + 1:03d}"
+    # Se não está em cache ou expirou, busca na API
+    try:
+        worksheet = spreadsheet.worksheet(worksheet_name)
+        worksheet_cache[cache_key] = worksheet
+        worksheet_cache_time[cache_key] = current_time
+        return worksheet
+    except Exception as e:
+        app.logger.error(f"Erro ao acessar worksheet: {e}")
+        raise
 
 @app.route('/pecas', methods=['GET'])
+@cache.cached(timeout=10, query_string=True)  # Cache reduzido para 10 segundos
 def get_pecas():
     try:
         pagina = request.args.get('pagina', default='freios')
@@ -119,7 +156,7 @@ def get_pecas():
         
         # Acessa a planilha remota
         spreadsheet = CLIENT.open_by_key(SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(pagina)
+        worksheet = get_cached_worksheet(spreadsheet, pagina)
         
         # Obtém todos os dados como lista de dicionários
         dados = worksheet.get_all_records()
@@ -170,11 +207,10 @@ def adicionar_peca():
             return jsonify({"erro": "Categoria não fornecida"}), 400
 
         spreadsheet = CLIENT.open_by_key(SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(categoria)
+        worksheet = get_cached_worksheet(spreadsheet, categoria)
 
-        # Obter todos os registros para determinar o próximo ID
-        records = worksheet.get_all_records()
-        next_id = get_next_id(records)
+        # Obter o próximo ID (usando col_values para eficiência)
+        next_id = get_next_id(worksheet)
 
         # Preparar dados para adicionar
         nova_peca = {
@@ -191,8 +227,12 @@ def adicionar_peca():
         # Adicionar nova linha
         worksheet.append_row(list(nova_peca.values()))
 
-        # Pequena pausa para garantir que a planilha foi atualizada
-        time.sleep(1)
+        # Invalidar cache para esta categoria
+        cache_key = f"{spreadsheet.id}_{categoria}"
+        if cache_key in worksheet_cache:
+            del worksheet_cache[cache_key]
+        if cache_key in worksheet_cache_time:
+            del worksheet_cache_time[cache_key]
 
         return jsonify({
             "mensagem": "Peça adicionada com sucesso",
@@ -224,7 +264,7 @@ def atualizar_peca(peca_id):
             return jsonify({"erro": "Categoria não fornecida"}), 400
 
         spreadsheet = CLIENT.open_by_key(SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(categoria)
+        worksheet = get_cached_worksheet(spreadsheet, categoria)
         records = worksheet.get_all_records()
 
         # Encontrar a linha da peça
@@ -256,8 +296,12 @@ def atualizar_peca(peca_id):
                 if col_index:
                     worksheet.update_cell(linha_index, col_index, data[campo])
 
-        # Pequena pausa para garantir que a planilha foi atualizada
-        time.sleep(1)
+        # Invalidar cache para esta categoria
+        cache_key = f"{spreadsheet.id}_{categoria}"
+        if cache_key in worksheet_cache:
+            del worksheet_cache[cache_key]
+        if cache_key in worksheet_cache_time:
+            del worksheet_cache_time[cache_key]
 
         return jsonify({"mensagem": "Peça atualizada com sucesso"}), 200
 
@@ -286,7 +330,7 @@ def deletar_peca(peca_id):
             return jsonify({"erro": "Categoria não fornecida"}), 400
 
         spreadsheet = CLIENT.open_by_key(SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(categoria)
+        worksheet = get_cached_worksheet(spreadsheet, categoria)
         records = worksheet.get_all_records()
 
         # Encontrar a linha da peça
@@ -302,8 +346,12 @@ def deletar_peca(peca_id):
         # Deletar a linha
         worksheet.delete_rows(linha_index)
 
-        # Pequena pausa para garantir que a planilha foi atualizada
-        time.sleep(1)
+        # Invalidar cache para esta categoria
+        cache_key = f"{spreadsheet.id}_{categoria}"
+        if cache_key in worksheet_cache:
+            del worksheet_cache[cache_key]
+        if cache_key in worksheet_cache_time:
+            del worksheet_cache_time[cache_key]
 
         return jsonify({"mensagem": "Peça deletada com sucesso"}), 200
 
@@ -354,3 +402,4 @@ def status_check():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
